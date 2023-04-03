@@ -62,7 +62,8 @@ public class Program
         {
             cloudfrontID = config.GetRequiredSection("CDN_DISTRIBUTION_ID").Get<string>()!;
             invalidationBaseCmd =
-                    "aws cloudfront create-invalidation --distribution-id " + cloudfrontID + " --paths ";
+                    "aws cloudfront create-invalidation --distribution-id " +
+                    cloudfrontID + " --paths \"/";
         }
         catch (System.Exception)
         {
@@ -78,12 +79,15 @@ public class Program
             // Delete file
             string filePathKey = s3Path + fileName;
             var response = await s3.DeleteObjectAsync(s3Bucket, filePathKey);
-            Console.WriteLine("s3://" + s3Bucket + "/" + filePathKey.PadRight(40) + " - " + response.HttpStatusCode);
+            Console.WriteLine(
+                "s3://" + s3Bucket + "/" + filePathKey.PadRight(40) +
+                " - " + response.HttpStatusCode
+            );
 
             // Invalidate CDN
             if (alsoInvalidateCloudfrontCDN)
             {
-                Console.WriteLine(invalidationBaseCmd + s3Path + filePathKey);
+                Console.WriteLine(invalidationBaseCmd + filePathKey + "\"");
             }
 
             // Delete secondary file
@@ -91,12 +95,15 @@ public class Program
             {
                 string secondaryPathKey = s3SecondaryPath + fileName;
                 var response2 = await s3.DeleteObjectAsync(s3Bucket, secondaryPathKey);
-                Console.WriteLine("s3://" + s3Bucket + "/" + secondaryPathKey.PadRight(40) + " - " + response2.HttpStatusCode);
+                Console.WriteLine(
+                    "s3://" + s3Bucket + "/" + secondaryPathKey.PadRight(40) +
+                    " - " + response2.HttpStatusCode
+                );
 
                 // Invalidate CDN
                 if (alsoInvalidateCloudfrontCDN)
                 {
-                    Console.WriteLine(invalidationBaseCmd + s3Path + secondaryPathKey);
+                    Console.WriteLine(invalidationBaseCmd + secondaryPathKey + "\"");
                 }
             }
         }
