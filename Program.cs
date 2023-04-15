@@ -80,8 +80,9 @@ public class Program
             string filePathKey = s3Path + fileName;
             var response = await s3.DeleteObjectAsync(s3Bucket, filePathKey);
             Console.WriteLine(
-                "s3://" + s3Bucket + "/" + filePathKey.PadRight(40) +
-                " - " + response.HttpStatusCode
+                $"s3://" + s3Bucket + "/" + filePathKey + " - " +
+                ((response.HttpStatusCode == System.Net.HttpStatusCode.NoContent) ?
+                    "Deleted" : response.HttpStatusCode.ToString())
             );
 
             // Invalidate CDN
@@ -96,9 +97,11 @@ public class Program
                 string secondaryPathKey = s3SecondaryPath + fileName;
                 var response2 = await s3.DeleteObjectAsync(s3Bucket, secondaryPathKey);
                 Console.WriteLine(
-                    "s3://" + s3Bucket + "/" + secondaryPathKey.PadRight(40) +
-                    " - " + response2.HttpStatusCode
-                );
+                $"s3://" + s3Bucket + "/" + secondaryPathKey + " - " +
+                ((response2.HttpStatusCode == System.Net.HttpStatusCode.NoContent) ?
+                    "Deleted" : response.HttpStatusCode.ToString())
+            );
+
 
                 // Invalidate CDN
                 if (alsoInvalidateCloudfrontCDN)
