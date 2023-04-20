@@ -1,4 +1,4 @@
-# S3 Batch Delete
+# S3 & Cloudfront Batch Delete
 
 This .NET console app reads a text file of filenames to be deleted from an AWS S3 Bucket. It is used for batch processing of large amount of files that would otherwise take too long to delete one by one.
 
@@ -21,30 +21,21 @@ A related Cloudfront CDN can also invalidate its cache of the deleted S3 files.
 }
 ```
 
-## Sample
+AWS Credentials will need to have IAM permissions to delete from S3, and optionally have invalidation permission for Cloudfront.
+
+## Input
 
 An input `ids.txt` text file containing:
 
 ```txt
-122402
-543212
+122402.jpg
+543212.jpg
+file3.pdf
+file4.png
 ```
 
-Would result in the following commands being run:
+Would result in 4 files being deleted from the S3 bucket and path specified in `appsettings.json`.
 
-```c#
-s3.DeleteObjectAsync(s3Bucket, 122402);
-aws cloudfront create-invalidation --distribution-id E1234 --paths "s3path/122402"
-s3.DeleteObjectAsync(s3Bucket, thumbnail/122402);
-aws cloudfront create-invalidation --distribution-id E1234 --paths "s3path/thumbnail/122402"
+If a `S3_SECONDARY_PATH` is set, any files with the same filename will be deleted from S3. This is useful for thumbnail images with the same filename, but different paths.
 
-s3.DeleteObjectAsync(s3Bucket, 543212);
-aws cloudfront create-invalidation --distribution-id E1234 --paths "s3path/543212"
-s3.DeleteObjectAsync(s3Bucket, thumbnail/543212);
-aws cloudfront create-invalidation --distribution-id E1234 --paths "s3path/thumbnail/543212"
-```
-
-## Todo
-
-- Switch cloudfront invalidation from aws command-line to .net sdk.
-- Simplify log output
+If `CDN_DISTRIBUTION_ID` is set, any Cloudfront CDN associated files will also be invalidated.
