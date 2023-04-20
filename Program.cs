@@ -1,5 +1,7 @@
 ﻿using Amazon;
 using Amazon.S3;
+using Amazon.CloudFront;
+using Amazon.CloudFront.Model;
 using Amazon.Runtime;
 using Microsoft.Extensions.Configuration;
 
@@ -9,7 +11,7 @@ public class Program
     {
         bool alsoDeleteSecondaryFile = true;
         bool alsoInvalidateCloudfrontCDN = true;
-        string s3Bucket, s3Path, s3SecondaryPath = "", cloudfrontID, invalidationBaseCmd = "";
+        string s3Bucket, s3Path, s3SecondaryPath = "", cloudfrontID = "";
         BasicAWSCredentials credentials;
 
         // Read file names from txt file
@@ -61,17 +63,19 @@ public class Program
         try
         {
             cloudfrontID = config.GetRequiredSection("CDN_DISTRIBUTION_ID").Get<string>()!;
-            invalidationBaseCmd =
-                    "aws cloudfront create-invalidation --distribution-id " +
-                    cloudfrontID + " --paths \"/";
         }
         catch (System.Exception)
         {
             alsoInvalidateCloudfrontCDN = false;
         }
 
-        // Establish S3
+        // Establish S3 client
         IAmazonS3 s3 = new AmazonS3Client(credentials, RegionEndpoint.APSoutheast2);
+
+        // Establish Cloudfront client
+        IAmazonCloudFront? cloudFront = null;
+        if (alsoInvalidateCloudfrontCDN)
+            cloudFront = new AmazonCloudFrontClient(credentials, RegionEndpoint.APSoutheast2);
 
         // Loop through each filename found, delete from s3 and invalidate cloudfront
         foreach (string fileName in fileNames)
@@ -88,7 +92,34 @@ public class Program
             // Invalidate CDN
             if (alsoInvalidateCloudfrontCDN)
             {
-                Console.WriteLine(invalidationBaseCmd + filePathKey + "\"");
+                try
+                {
+                    Paths cloudfrontPath = new Paths();
+                    cloudfrontPath.Items.Add("/" + filePathKey.Replace("\\", "/"));
+                    cloudfrontPath.Quantity = 1;
+
+                    CreateInvalidationRequest request =
+                        new CreateInvalidationRequest(
+                            cloudfrontID,
+                            new InvalidationBatch(cloudfrontPath, filePathKey)
+                        );
+                    var invalidationResponse = await cloudFront!.CreateInvalidationAsync(request);
+
+                    if (invalidationResponse.HttpStatusCode == System.Net.HttpStatusCode.Created)
+                    {
+                        Console.WriteLine("Cloudfront: " + cloudfrontPath.Items[0] + " Invalidation Created");
+                    }
+                }
+                catch (Amazon.CloudFront.Model.AccessDeniedException e)
+                {
+                    Console.WriteLine(
+                        "Error requesting Cloudfront Invalidation - IAM Role Access Denied\n" + e.Message
+                    );
+                }
+                catch (System.Exception)
+                {
+                    throw;
+                }
             }
 
             // Delete secondary file
@@ -97,16 +128,43 @@ public class Program
                 string secondaryPathKey = s3SecondaryPath + fileName;
                 var response2 = await s3.DeleteObjectAsync(s3Bucket, secondaryPathKey);
                 Console.WriteLine(
-                $"s3://" + s3Bucket + "/" + secondaryPathKey + " - " +
-                ((response2.HttpStatusCode == System.Net.HttpStatusCode.NoContent) ?
-                    "Deleted" : response.HttpStatusCode.ToString())
-            );
-
+                    $"s3://" + s3Bucket + "/" + secondaryPathKey + " - " +
+                    ((response2.HttpStatusCode == System.Net.HttpStatusCode.NoContent) ?
+                        "Deleted" : response.HttpStatusCode.ToString())
+                );
 
                 // Invalidate CDN
                 if (alsoInvalidateCloudfrontCDN)
                 {
-                    Console.WriteLine(invalidationBaseCmd + secondaryPathKey + "\"");
+                    try
+                    {
+                        Paths cloudfrontPath = new Paths();
+                        cloudfrontPath.Items.Add("/" + secondaryPathKey.Replace("\\", "/"));
+                        cloudfrontPath.Quantity = 1;
+
+                        CreateInvalidationRequest request =
+                            new CreateInvalidationRequest(
+                                cloudfrontID,
+                                new InvalidationBatch(cloudfrontPath, secondaryPathKey)
+                            );
+
+                        var invalidationResponse = await cloudFront!.CreateInvalidationAsync(request);
+
+                        if (invalidationResponse.HttpStatusCode == System.Net.HttpStatusCode.Created)
+                        {
+                            Console.WriteLine("Cloudfront: " + cloudfrontPath.Items[0] + " Invalidation Created");
+                        }
+                    }
+                    catch (Amazon.CloudFront.Model.AccessDeniedException e)
+                    {
+                        Console.WriteLine(
+                            "Error requesting Cloudfront Invalidation - IAM Role Access Denied\n" + e.Message
+                        );
+                    }
+                    catch (System.Exception)
+                    {
+                        throw;
+                    }
                 }
             }
         }
