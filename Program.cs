@@ -128,7 +128,7 @@ public class Program
                 string secondaryPathKey = s3SecondaryPath + fileName;
                 var response2 = await s3.DeleteObjectAsync(s3Bucket, secondaryPathKey);
                 Console.WriteLine(
-                    $"s3://" + s3Bucket + "/" + secondaryPathKey + " - " +
+                    $"s3://" + s3Bucket + "/" + secondaryPathKey + " - \t\t" +
                     ((response2.HttpStatusCode == System.Net.HttpStatusCode.NoContent) ?
                         "Deleted" : response.HttpStatusCode.ToString())
                 );
@@ -152,7 +152,7 @@ public class Program
 
                         if (invalidationResponse.HttpStatusCode == System.Net.HttpStatusCode.Created)
                         {
-                            Console.WriteLine("Cloudfront: " + cloudfrontPath.Items[0] + " Invalidation Created");
+                            Console.WriteLine("cloudfront:/" + cloudfrontPath.Items[0] + "\t\t Invalidated\n");
                         }
                     }
                     catch (Amazon.CloudFront.Model.AccessDeniedException e)
