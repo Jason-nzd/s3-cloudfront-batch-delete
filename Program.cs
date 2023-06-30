@@ -107,7 +107,7 @@ public class Program
 
                     if (invalidationResponse.HttpStatusCode == System.Net.HttpStatusCode.Created)
                     {
-                        Console.WriteLine("Cloudfront: " + cloudfrontPath.Items[0] + " Invalidation Created");
+                        Console.WriteLine("cloudfront:/" + cloudfrontPath.Items[0] + "\t\t\t Invalidated\n");
                     }
                 }
                 catch (Amazon.CloudFront.Model.AccessDeniedException e)
@@ -152,7 +152,7 @@ public class Program
 
                         if (invalidationResponse.HttpStatusCode == System.Net.HttpStatusCode.Created)
                         {
-                            Console.WriteLine("cloudfront:/" + cloudfrontPath.Items[0] + "\t\t Invalidated\n");
+                            Console.WriteLine("cloudfront:/" + cloudfrontPath.Items[0] + "\t\t\t Invalidated\n");
                         }
                     }
                     catch (Amazon.CloudFront.Model.AccessDeniedException e)
