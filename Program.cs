@@ -4,6 +4,7 @@ using Amazon.CloudFront;
 using Amazon.CloudFront.Model;
 using Amazon.Runtime;
 using Microsoft.Extensions.Configuration;
+using System.Net;
 
 public class Program
 {
@@ -16,6 +17,7 @@ public class Program
 
         // Read file names from txt file
         var fileNames = ReadLinesFromFile("ids.txt", appendExtension: ".webp");
+        int maxStringLength = MaxStringLength(fileNames);
 
         // Get config from appsettings.json
         IConfiguration config = new ConfigurationBuilder()
@@ -83,10 +85,11 @@ public class Program
             // Delete file
             string filePathKey = s3Path + fileName;
             var response = await s3.DeleteObjectAsync(s3Bucket, filePathKey);
-            Console.WriteLine(
-                $"s3://" + s3Bucket + "/" + filePathKey + " - " +
-                ((response.HttpStatusCode == System.Net.HttpStatusCode.NoContent) ?
-                    "Deleted" : response.HttpStatusCode.ToString())
+
+            PrintURLStatus(
+                "s3://" + s3Bucket + "/" + filePathKey,
+                response.HttpStatusCode,
+                maxStringLength
             );
 
             // Invalidate CDN
@@ -105,15 +108,18 @@ public class Program
                         );
                     var invalidationResponse = await cloudFront!.CreateInvalidationAsync(request);
 
-                    if (invalidationResponse.HttpStatusCode == System.Net.HttpStatusCode.Created)
-                    {
-                        Console.WriteLine("cloudfront:/" + cloudfrontPath.Items[0] + "\t\t\t Invalidated\n");
-                    }
+                    PrintURLStatus(
+                        "cloudfront:/" + cloudfrontPath.Items[0],
+                        invalidationResponse.HttpStatusCode,
+                        maxStringLength
+                    );
+
                 }
                 catch (Amazon.CloudFront.Model.AccessDeniedException e)
                 {
                     Console.WriteLine(
-                        "Error requesting Cloudfront Invalidation - IAM Role Access Denied\n" + e.Message
+                        "Error requesting Cloudfront Invalidation - IAM Role Access Denied\n" +
+                        e.Message
                     );
                 }
                 catch (System.Exception)
@@ -127,10 +133,11 @@ public class Program
             {
                 string secondaryPathKey = s3SecondaryPath + fileName;
                 var response2 = await s3.DeleteObjectAsync(s3Bucket, secondaryPathKey);
-                Console.WriteLine(
-                    $"s3://" + s3Bucket + "/" + secondaryPathKey + " - \t\t" +
-                    ((response2.HttpStatusCode == System.Net.HttpStatusCode.NoContent) ?
-                        "Deleted" : response.HttpStatusCode.ToString())
+
+                PrintURLStatus(
+                    "s3://" + s3Bucket + "/" + secondaryPathKey,
+                    response2.HttpStatusCode,
+                    maxStringLength
                 );
 
                 // Invalidate CDN
@@ -150,15 +157,17 @@ public class Program
 
                         var invalidationResponse = await cloudFront!.CreateInvalidationAsync(request);
 
-                        if (invalidationResponse.HttpStatusCode == System.Net.HttpStatusCode.Created)
-                        {
-                            Console.WriteLine("cloudfront:/" + cloudfrontPath.Items[0] + "\t\t\t Invalidated\n");
-                        }
+                        PrintURLStatus(
+                            "cloudfront:/" + cloudfrontPath.Items[0],
+                            invalidationResponse.HttpStatusCode,
+                            maxStringLength
+                        );
                     }
                     catch (Amazon.CloudFront.Model.AccessDeniedException e)
                     {
                         Console.WriteLine(
-                            "Error requesting Cloudfront Invalidation - IAM Role Access Denied\n" + e.Message
+                            "Error requesting Cloudfront Invalidation - IAM Role Access Denied\n" +
+                            e.Message
                         );
                     }
                     catch (System.Exception)
@@ -167,13 +176,15 @@ public class Program
                     }
                 }
             }
+            Console.WriteLine(); // Write new line for each looped filename
         }
 
         // End program and clean-up
         s3.Dispose();
     }
 
-    // Reads non empty lines from a txt file, optionally appends extension to each line, then return as a List
+    // Reads non empty lines from a txt file, optionally appends extension to each line, 
+    // Returns as a List
     public static List<string> ReadLinesFromFile(string fileName, string appendExtension = "")
     {
         try
@@ -194,4 +205,32 @@ public class Program
             throw new Exception("Unable to read file " + fileName + "\n" + e.Message);
         }
     }
+
+    // Logs the URL and its deletion/invalidation status
+    static void PrintURLStatus(string url, HttpStatusCode statusCode, int padding = 70)
+    {
+        // Pad URLs with a default padding, or +4 for over-sized URLs
+        if (url.Length > padding) padding = url.Length + 4;
+        string statusMessage = statusCode.ToString();
+
+        // If the response is 'NoContent', then the s3 file has been deleted
+        if (statusCode == System.Net.HttpStatusCode.NoContent) statusMessage = "Deleted";
+
+        // If the response is 'Created', then the cloudfront invalidation has started
+        else if (statusCode == System.Net.HttpStatusCode.Created) statusMessage = "Invalidating";
+
+        Console.WriteLine(url.PadRight(padding) + " - " + statusMessage);
+    }
+
+    // Find the max string length within a list of strings
+    static int MaxStringLength(List<string> strings)
+    {
+        int maxLength = 0;
+        foreach (string s in strings)
+        {
+            if (s.Length > maxLength) maxLength = s.Length;
+        }
+        return maxLength;
+    }
+
 }
