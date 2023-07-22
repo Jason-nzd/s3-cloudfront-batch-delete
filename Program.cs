@@ -82,6 +82,12 @@ public class Program
         // Find the max string length of the filenames, for logging padding purposes
         int maxStringLength = FindMaxStringLength(fileNames);
 
+        // Log intro message
+        Console.WriteLine(
+            "S3 & CloudFront Batch Deleter \nFound " + fileNames.Count +
+            " base file names to delete\n"
+        );
+
         // Loop through each filename found, delete from s3 and invalidate cloudfront
         foreach (string fileName in fileNames)
         {
@@ -181,6 +187,12 @@ public class Program
             }
             Console.WriteLine(); // Write new line for each looped filename
         }
+
+        // Log completion message
+        Console.WriteLine(
+            "Deleting and Invalidating of " + fileNames.Count +
+            " files and additional secondary files complete."
+        );
 
         // End program and clean-up
         s3.Dispose();
