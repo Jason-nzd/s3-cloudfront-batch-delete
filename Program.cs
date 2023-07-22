@@ -8,16 +8,16 @@ using System.Net;
 
 public class Program
 {
+    public static string s3Bucket = "", s3Path = "", s3SecondaryPath = "", cloudfrontID = "";
+
     public static async Task Main(string[] args)
     {
         bool alsoDeleteSecondaryFile = true;
         bool alsoInvalidateCloudfrontCDN = true;
-        string s3Bucket, s3Path, s3SecondaryPath = "", cloudfrontID = "";
         BasicAWSCredentials credentials;
 
         // Read file names from txt file
         var fileNames = ReadLinesFromFile("ids.txt", appendExtension: ".webp");
-        int maxStringLength = MaxStringLength(fileNames);
 
         // Get config from appsettings.json
         IConfiguration config = new ConfigurationBuilder()
@@ -78,6 +78,9 @@ public class Program
         IAmazonCloudFront? cloudFront = null;
         if (alsoInvalidateCloudfrontCDN)
             cloudFront = new AmazonCloudFrontClient(credentials, RegionEndpoint.APSoutheast2);
+
+        // Find the max string length of the filenames, for logging padding purposes
+        int maxStringLength = FindMaxStringLength(fileNames);
 
         // Loop through each filename found, delete from s3 and invalidate cloudfront
         foreach (string fileName in fileNames)
@@ -223,12 +226,13 @@ public class Program
     }
 
     // Find the max string length within a list of strings
-    static int MaxStringLength(List<string> strings)
+    static int FindMaxStringLength(List<string> strings)
     {
         int maxLength = 0;
+        string baseUrl = "s3://" + s3Bucket + "/" + s3Path + "/200/";
         foreach (string s in strings)
         {
-            if (s.Length > maxLength) maxLength = s.Length;
+            if (s.Length > maxLength) maxLength = s.Length + baseUrl.Length;
         }
         return maxLength;
     }
