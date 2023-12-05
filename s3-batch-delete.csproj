@@ -9,9 +9,9 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="AWSSDK.CloudFront" Version="3.7.105.37" />
-    <PackageReference Include="awSSDK.S3" Version="3.7.103.26" />
-    <PackageReference Include="microsoft.extensions.Hosting" Version="7.0.1" />
+    <PackageReference Include="AWSSDK.CloudFront" Version="3.7.301.6" />
+    <PackageReference Include="awSSDK.S3" Version="3.7.304.2" />
+    <PackageReference Include="microsoft.extensions.Hosting" Version="8.0.0" />
   </ItemGroup>
 
     <ItemGroup>
