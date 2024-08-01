@@ -8,23 +8,69 @@ using System.Net;
 
 public class Program
 {
+    public static RegionEndpoint region = RegionEndpoint.APSoutheast2;
+    public static int padFilePathLogging = 50; // pad filename size for easier log reading
     public static string s3Bucket = "", s3Path = "", s3SecondaryPath = "", cloudfrontID = "";
+    public static bool alsoDeleteSecondaryFile = true, alsoInvalidateCloudfrontCDN = true;
+    public static IAmazonS3? s3;
+    public static IAmazonCloudFront? cloudFront;
 
     public static async Task Main(string[] args)
     {
-        bool alsoDeleteSecondaryFile = true;
-        bool alsoInvalidateCloudfrontCDN = true;
-        BasicAWSCredentials credentials;
-
         // Read file names from txt file
-        var fileNames = ReadLinesFromFile("ids.txt", appendExtension: ".webp");
+        var fileNames = ReadLinesFromFile("FileNamesToDelete.txt", appendExtension: ".webp");
 
-        // Get config from appsettings.json
+        // Establish connection to S3 and cloudfront
+        await EstablishAWSConnection();
+
+        // Log intro message
+        Console.WriteLine(
+            $"\nS3 & CloudFront Batch Deleter - {fileNames.Count} base file names to delete \n" +
+            LineString() +
+            $"Base Path : s3://{s3Bucket}/{s3Path}/\n" +
+            (alsoDeleteSecondaryFile ? $"Secondary : s3://{s3Bucket}/{s3SecondaryPath}/\n" : "") +
+            (alsoInvalidateCloudfrontCDN ? $"Cloudfront: cloudfront://{cloudfrontID}/{s3Path}/\n" : "") +
+            (alsoInvalidateCloudfrontCDN && alsoDeleteSecondaryFile ?
+                $"Cloudfront: cloudfront://{cloudfrontID}/{s3SecondaryPath}/\n" : "") +
+            LineString()
+        );
+
+        // Loop through each filename found
+        foreach (string fileName in fileNames)
+        {
+            // Delete file from s3
+            await DeleteS3File(s3Path + "/" + fileName);
+
+            // Delete secondary file
+            if (alsoDeleteSecondaryFile)
+                await DeleteS3File(s3SecondaryPath + "/" + fileName);
+
+            // Delete file from cloudfront
+            if (alsoInvalidateCloudfrontCDN)
+                await InvalidateCloudfrontFile(s3Path + "/" + fileName);
+
+            // Delete secondary file from cloudfront
+            if (alsoInvalidateCloudfrontCDN && alsoDeleteSecondaryFile)
+                await InvalidateCloudfrontFile(s3SecondaryPath + "/" + fileName);
+        }
+
+        // Log completion message
+        Console.WriteLine("\nDeletion and invalidation complete.");
+
+        // End program and clean-up
+        s3!.Dispose();
+    }
+
+    // Read appsettings.json and establish S3 and Cloudfront connection
+    static async Task<bool> EstablishAWSConnection()
+    {
         IConfiguration config = new ConfigurationBuilder()
-            .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
+            .AddJsonFile("appsettings.json", optional: true, reloadOnChange: true) //load base settings
+            .AddJsonFile("appsettings.local.json", optional: true, reloadOnChange: true) //load local settings
             .AddEnvironmentVariables()
             .Build();
 
+        BasicAWSCredentials credentials;
         try
         {
             // Set AWS credentials
@@ -51,6 +97,17 @@ public class Program
             throw;
         }
 
+        // Establish S3 client
+        try
+        {
+            s3 = new AmazonS3Client(credentials, region);
+            await s3.ListBucketsAsync(); // Test connection
+        }
+        catch (Exception e)
+        {
+            Console.WriteLine("Error connecting to S3 - Check IAM permissions\n\n" + e.Message);
+        }
+
         // Try get optional s3 secondary path
         try
         {
@@ -66,187 +123,161 @@ public class Program
         {
             cloudfrontID = config.GetRequiredSection("CDN_DISTRIBUTION_ID").Get<string>()!;
         }
-        catch (System.Exception)
+        catch (Exception)
         {
             alsoInvalidateCloudfrontCDN = false;
         }
 
-        // Establish S3 client
-        IAmazonS3 s3 = new AmazonS3Client(credentials, RegionEndpoint.APSoutheast2);
-
-        // Establish Cloudfront client
-        IAmazonCloudFront? cloudFront = null;
+        // Establish cloudfront client
         if (alsoInvalidateCloudfrontCDN)
-            cloudFront = new AmazonCloudFrontClient(credentials, RegionEndpoint.APSoutheast2);
-
-        // Find the max string length of the filenames, for logging padding purposes
-        int maxStringLength = FindMaxStringLength(fileNames);
-
-        // Log intro message
-        Console.WriteLine(
-            "S3 & CloudFront Batch Deleter \nFound " + fileNames.Count +
-            " base file names to delete\n"
-        );
-
-        // Loop through each filename found, delete from s3 and invalidate cloudfront
-        foreach (string fileName in fileNames)
         {
-            // Delete file
-            string filePathKey = s3Path + fileName;
-            var response = await s3.DeleteObjectAsync(s3Bucket, filePathKey);
-
-            PrintURLStatus(
-                "s3://" + s3Bucket + "/" + filePathKey,
-                response.HttpStatusCode,
-                maxStringLength
-            );
-
-            // Invalidate CDN
-            if (alsoInvalidateCloudfrontCDN)
+            try
             {
-                try
-                {
-                    Paths cloudfrontPath = new Paths();
-                    cloudfrontPath.Items.Add("/" + filePathKey.Replace("\\", "/"));
-                    cloudfrontPath.Quantity = 1;
-
-                    CreateInvalidationRequest request =
-                        new CreateInvalidationRequest(
-                            cloudfrontID,
-                            new InvalidationBatch(cloudfrontPath, filePathKey)
-                        );
-                    var invalidationResponse = await cloudFront!.CreateInvalidationAsync(request);
-
-                    PrintURLStatus(
-                        "cloudfront:/" + cloudfrontPath.Items[0],
-                        invalidationResponse.HttpStatusCode,
-                        maxStringLength
-                    );
-
-                }
-                catch (Amazon.CloudFront.Model.AccessDeniedException e)
-                {
-                    Console.WriteLine(
-                        "Error requesting Cloudfront Invalidation - IAM Role Access Denied\n" +
-                        e.Message
-                    );
-                }
-                catch (System.Exception)
-                {
-                    throw;
-                }
+                cloudFront = new AmazonCloudFrontClient(credentials, RegionEndpoint.APSoutheast2);
+                await cloudFront.ListDistributionsAsync(); // Test connection
             }
-
-            // Delete secondary file
-            if (alsoDeleteSecondaryFile)
+            catch (Exception e)
             {
-                string secondaryPathKey = s3SecondaryPath + fileName;
-                var response2 = await s3.DeleteObjectAsync(s3Bucket, secondaryPathKey);
-
-                PrintURLStatus(
-                    "s3://" + s3Bucket + "/" + secondaryPathKey,
-                    response2.HttpStatusCode,
-                    maxStringLength
-                );
-
-                // Invalidate CDN
-                if (alsoInvalidateCloudfrontCDN)
-                {
-                    try
-                    {
-                        Paths cloudfrontPath = new Paths();
-                        cloudfrontPath.Items.Add("/" + secondaryPathKey.Replace("\\", "/"));
-                        cloudfrontPath.Quantity = 1;
-
-                        CreateInvalidationRequest request =
-                            new CreateInvalidationRequest(
-                                cloudfrontID,
-                                new InvalidationBatch(cloudfrontPath, secondaryPathKey)
-                            );
-
-                        var invalidationResponse = await cloudFront!.CreateInvalidationAsync(request);
-
-                        PrintURLStatus(
-                            "cloudfront:/" + cloudfrontPath.Items[0],
-                            invalidationResponse.HttpStatusCode,
-                            maxStringLength
-                        );
-                    }
-                    catch (Amazon.CloudFront.Model.AccessDeniedException e)
-                    {
-                        Console.WriteLine(
-                            "Error requesting Cloudfront Invalidation - IAM Role Access Denied\n" +
-                            e.Message
-                        );
-                    }
-                    catch (System.Exception)
-                    {
-                        throw;
-                    }
-                }
+                Console.WriteLine("Error connecting to cloudfront - Check IAM permissions\n\n" + e.Message);
+                throw;
             }
-            Console.WriteLine(); // Write new line for each looped filename
         }
-
-        // Log completion message
-        Console.WriteLine(
-            "Deleting and Invalidating of " + fileNames.Count +
-            " files and additional secondary files complete."
-        );
-
-        // End program and clean-up
-        s3.Dispose();
+        return true;
     }
 
     // Reads non empty lines from a txt file, optionally appends extension to each line, 
     // Returns as a List
-    public static List<string> ReadLinesFromFile(string fileName, string appendExtension = "")
+    static List<string> ReadLinesFromFile(string fileName, string appendExtension = "")
     {
         try
         {
             List<string> result = new List<string>();
             string[] lines = File.ReadAllLines(@fileName);
 
-            if (lines.Length == 0) throw new Exception("No lines found in " + fileName);
-
             foreach (string line in lines)
             {
-                if (line != null) result.Add(line.Trim() + appendExtension);
+                if (line != null && !line.StartsWith("#")) result.Add(line.Trim() + appendExtension);
             }
+
+            if (result.Count == 0)
+            {
+                Console.WriteLine("No lines found in " + fileName);
+                Environment.Exit(0);
+            }
+
             return result;
         }
-        catch (System.Exception e)
+        catch (Exception e)
         {
             throw new Exception("Unable to read file " + fileName + "\n" + e.Message);
         }
     }
 
-    // Logs the URL and its deletion/invalidation status
-    static void PrintURLStatus(string url, HttpStatusCode statusCode, int padding = 70)
+    // Deletes a file from S3
+    static async Task<HttpStatusCode> DeleteS3File(string filePathKey)
     {
-        // Pad URLs with a default padding, or +4 for over-sized URLs
-        if (url.Length > padding) padding = url.Length + 4;
-        string statusMessage = statusCode.ToString();
+        Console.Write($"s3://{s3Bucket}/{filePathKey}".PadRight(padFilePathLogging));
 
-        // If the response is 'NoContent', then the s3 file has been deleted
-        if (statusCode == System.Net.HttpStatusCode.NoContent) statusMessage = "Deleted";
-
-        // If the response is 'Created', then the cloudfront invalidation has started
-        else if (statusCode == System.Net.HttpStatusCode.Created) statusMessage = "Invalidating";
-
-        Console.WriteLine(url.PadRight(padding) + " - " + statusMessage);
-    }
-
-    // Find the max string length within a list of strings
-    static int FindMaxStringLength(List<string> strings)
-    {
-        int maxLength = 0;
-        string baseUrl = "s3://" + s3Bucket + "/" + s3Path + "/200/";
-        foreach (string s in strings)
+        try
         {
-            if (s.Length > maxLength) maxLength = s.Length + baseUrl.Length;
+            // Check file exists
+            var existsResponse = await s3!.GetObjectAsync(s3Bucket, filePathKey);
+
+            // Delete file
+            var response = await s3.DeleteObjectAsync(s3Bucket, filePathKey);
+            Console.Write("\t - deleted\n");
+            return HttpStatusCode.OK;
         }
-        return maxLength;
+        catch
+        {
+            Console.Write("\t - already deleted\n");
+            return HttpStatusCode.NotFound;
+        }
     }
 
+    // Invalidates a file from Cloudfront
+    static async Task<HttpStatusCode> InvalidateCloudfrontFile(string filePathKey)
+    {
+        Console.Write($"cloudfront://{cloudfrontID}/{filePathKey}".PadRight(padFilePathLogging));
+
+        // Get the distribution domain
+        GetDistributionResponse res =
+            await cloudFront!.GetDistributionAsync(new GetDistributionRequest(cloudfrontID));
+
+        string domainName = res.Distribution.DomainName;
+
+        // Check if file exists on distribution
+        string urlToCheck = $"https://{domainName}/{filePathKey}";
+        bool fileExists = await CheckHttpFileExists(urlToCheck);
+        if (!fileExists)
+        {
+            Console.Write("\t - already deleted\n");
+            return HttpStatusCode.OK;
+        }
+        else
+        {
+            // If exists, begin invalidation
+            try
+            {
+                Paths cloudfrontPath = new Paths();
+                cloudfrontPath.Items.Add("/" + filePathKey.Replace("\\", "/"));
+                cloudfrontPath.Quantity = 1;
+
+                CreateInvalidationRequest request =
+                    new CreateInvalidationRequest(
+                        cloudfrontID,
+                        new InvalidationBatch(cloudfrontPath, filePathKey)
+                    );
+
+                var invalidationResponse = await cloudFront!.CreateInvalidationAsync(request);
+
+                if (invalidationResponse.HttpStatusCode == HttpStatusCode.Created)
+                    Console.Write("\t - invalidating\n");
+                else Console.Write(invalidationResponse.HttpStatusCode + "\n");
+
+                return invalidationResponse.HttpStatusCode;
+
+            }
+            catch (AccessDeniedException e)
+            {
+                Console.WriteLine(
+                    "Cloudfront Invalidation - IAM Role Access Denied\n" + e.Message
+                );
+                return HttpStatusCode.Forbidden;
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine(e.Message);
+                return HttpStatusCode.Forbidden;
+            }
+        }
+    }
+
+    // Return a repeated hyphen line -------- for logging purposes
+    static string LineString(char character = '-', int length = 72)
+    {
+        string line = "";
+        for (int i = 0; i < length; i++)
+        {
+            line += character;
+        }
+        return line + "\n";
+    }
+
+    // Check if a file exists over http. Is used for cloudfront checks.
+    static async Task<bool> CheckHttpFileExists(string fileUrl)
+    {
+        try
+        {
+            using (HttpClient client = new HttpClient())
+            {
+                HttpResponseMessage response = await client.GetAsync(fileUrl);
+                return response.IsSuccessStatusCode;
+            }
+        }
+        catch (HttpRequestException)
+        {
+            return false;
+        }
+    }
 }
