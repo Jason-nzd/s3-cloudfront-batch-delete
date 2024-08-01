@@ -1,0 +1,1 @@
+# Add list of files to batch delete, 1 per line. File extensions can be appended within the code.
